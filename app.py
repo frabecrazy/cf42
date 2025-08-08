@@ -1,6 +1,147 @@
 import streamlit as st
 import pandas as pd
 import random
+import gspread
+from oauth2client.service_account import ServiceAccountCredentials
+
+st.set_page_config(page_title="Digital Carbon Footprint Calculator", layout="wide")
+
+CREDS_FILE = "cfc-data-468413-fa0fb7b11ff2.json"
+
+# Change to your desired sheet name (the script will create it if it doesn't exist)
+
+SHEET_NAME = "Dati CFC"
+
+
+GSCOPE = [
+
+"https://spreadsheets.google.com/feeds",
+
+"https://www.googleapis.com/auth/spreadsheets",
+
+"https://www.googleapis.com/auth/drive",
+
+]
+
+
+def get_gsheet_client():
+
+"""Return an authorized gspread client or raise an exception."""
+
+creds = ServiceAccountCredentials.from_json_keyfile_name(CREDS_FILE, GSCOPE)
+
+client = gspread.authorize(creds)
+
+return client
+
+
+def ensure_sheet_and_headers():
+
+"""
+
+Ensure the spreadsheet exists and the header row is present.
+
+Returns the first worksheet (sheet1).
+
+"""
+
+client = get_gsheet_client()
+
+try:
+
+sh = client.open(SHEET_NAME)
+
+except gspread.SpreadsheetNotFound:
+
+sh = client.create(SHEET_NAME)
+
+sheet = sh.sheet1
+
+
+required_headers = ["timestamp", "Total Emissions", "Devices Emissions", "Digital Activities Emissions", "AI Tools Emissions"]
+
+headers = sheet.row_values(1)
+
+# If header row is missing or not matching required set, replace it
+
+if not headers or set(required_headers) != set(headers):
+
+try:
+
+# Remove existing first row if present
+
+if headers:
+
+sheet.delete_row(1)
+
+except Exception:
+
+pass
+
+# insert header row
+
+sheet.insert_row(required_headers, index=1)
+
+return sheet
+
+
+def append_results_to_gsheet(total, devices, activities, ai_tools):
+
+"""Append a single row with timestamp and emissions to the sheet."""
+
+sheet = ensure_sheet_and_headers()
+
+ts = datetime.utcnow().isoformat()
+
+row = [ts, float(total), float(devices), float(activities), float(ai_tools)]
+
+sheet.append_row(row, value_input_option="USER_ENTERED")
+
+
+def load_gsheet_df():
+
+"""Return a pandas DataFrame of the sheet contents (excluding header)."""
+
+sheet = ensure_sheet_and_headers()
+
+data = sheet.get_all_records()
+
+df = pd.DataFrame(data)
+
+# ensure numeric columns
+
+for col in ["Total Emissions", "Devices Emissions", "Digital Activities Emissions", "AI Tools Emissions"]:
+
+if col in df.columns:
+
+df[col] = pd.to_numeric(df[col], errors="coerce")
+
+return df
+
+
+def compute_medians_from_sheet():
+
+"""Return medians dict or None if the sheet is empty / unreadable."""
+
+df = load_gsheet_df()
+
+if df.empty:
+
+return None
+
+med = {
+
+"Total Emissions": float(df["Total Emissions"].median()) if "Total Emissions" in df.columns else None,
+
+"Devices Emissions": float(df["Devices Emissions"].median()) if "Devices Emissions" in df.columns else None,
+
+"Digital Activities Emissions": float(df["Digital Activities Emissions"].median()) if "Digital Activities Emissions" in df.columns else None,
+
+"AI Tools Emissions": float(df["AI Tools Emissions"].median()) if "AI Tools Emissions" in df.columns else None,
+
+}
+
+return med
 
 st.set_page_config(page_title="Digital Carbon Footprint Calculator", layout="wide")
 
@@ -338,5 +479,6 @@ elif st.session_state.page == "main":
     show_main()
 elif st.session_state.page == "results":
     show_results()
+
 
 
